@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+.idea/
+config/profile.json
+config/electricity.json
+browser/profiles/
+.local/
+reports/generated/
+*.log
