@@ -1,77 +1,119 @@
 ---
-name: fosu-campus-agent
-description: Use this skill for Foshan University public dormitory electricity queries, including usage, purchase records, validation, caching, summaries, and zero-dependency charts.
+name: electricity-query
+description: 查询佛山科学技术学院宿舍电费系统（http://10.10.60.223:8010/）的用电与购电记录，并生成可交互的单文件 HTML 折线图报告。当用户提到查电费、宿舍用电、剩余电量、购电记录、电费曲线、用电趋势、某个房间用了多少度电时使用。
+whenToUse: 用户要求查询、统计或可视化某个宿舍房间的用电量、购电（充值）记录、剩余电量，或对比某段时间的用电情况时。
 ---
 
-# Foshan University Electricity Agent
+# 宿舍电费查询与可视化
 
-This skill supports the public Foshan University dormitory electricity selector only. It does not support leave applications or any other campus workflow.
+把校园用电查询系统（ASP.NET WebForms，无需登录）抓成本地缓存，再渲染成一个**完全离线的单文件 HTML 报告**：折线图、时间段切换、按日/周/月聚合、余额反推曲线。
 
-## Operating rules
+## 快速开始
 
-1. Electricity is read-only. Never purchase electricity, pay, change account data, or request credentials for the public selector.
-2. Do not store or print passwords, cookies, tokens, ViewState, or browser profiles.
-3. Parse a room code such as `D7502`, `D131402`, `国交502`, or `河滨502` before opening the page. Validate the known building range and special floor limits locally.
-4. Read the actual page options at every level. If the building, floor, or room does not exist, stop before clicking the query button and report the concrete value.
-5. Query `used`, `buy`, or `both` separately. Preserve usage, purchase quantity, amount, purchaser, and unit price as different fields.
-6. Normalize result dates from both `YYYY-MM-DD` and `M/D/YYYY h:mm:ss` formats. Keep zero-usage rows and multiple purchases on the same date.
-7. Preserve missing dates as missing records; never invent zeroes.
-8. Prefer the existing Codex in-app browser tab when it is already on the electricity site. Use the visible browser for the normal interaction. The standalone Chrome/Edge flow is only a fallback when in-app browser control is unavailable.
-9. Use zero-dependency SVG for charts. Do not depend on CDN libraries. Report chart success only when the SVG contains actual drawing elements and data points.
+所有命令都在技能目录下运行，用 Node 绝对路径（系统 PATH 里没有 `node`）：
 
-## Public query path
-
-Target: `http://10.10.60.223:8010/`
-
-Use these controls:
-
-- `#drlouming`: building
-- `#drceng`: floor
-- `#drfangjian`: room
-- `#usedR` / `#buyR`: record type
-- `#ImageButton1`: query
-- `#txtstart` / `#txtend` / `#btnser`: result date filter
-
-Supported room conventions:
-
-- D1-D41 with three-digit room codes, for example `D7502` or `D20502`.
-- D13 with a four-digit room code, for example `D131402` for floor 14 room 02.
-- 国交 uses three-digit rooms and has up to 8 floors.
-- 河滨 uses three-digit rooms and has up to 6 floors.
-
-Supported ranges include today, yesterday, 7 days, 30 days, 3 months, 6 months, 1-4 years, and explicit start/end dates.
-
-## Cache and presentation
-
-For room-specific queries, use `.local/electricity-cache.json` as an ignored local cache. Record covered date intervals separately from returned items. Query only missing intervals and merge records by stable fields; purchase records must include their original time in the deduplication key.
-
-Return remaining electricity when visible, the requested record groups, actual returned date range, counts, and summary statistics. If requested, write CSV and a zero-dependency SVG with a blue usage line on the left axis and red purchase points on the right axis.
-
-## Natural interaction
-
-Examples:
-
-- “帮我查 D7502 最近 30 天的用电记录。”
-- “帮我查 D7502 最近一年用电和购电，并生成图表。”
-- “查 D131402 从 2026-08-01 到 2026-08-31 的购电记录。”
-
-Do not ask for an account or password for a room-specific public query. If no room is provided, the older logged-in result-page fallback may be used only when the user clearly requests it.
-
-## Standalone fallback
-
-From the repository root:
-
-```text
-python -m fosu_campus_agent electricity --preset 30d --browser --room D7502 --record-type both
-python -m fosu_campus_agent electricity --preset 1y --browser --room D7502 --record-type both --chart reports/generated/d7502-1y.svg
+```powershell
+$NODE = "C:\Users\jay\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe"
+$SKILL = "C:\Users\jay\.dsh\skills\electricity-query"
+cd $SKILL
 ```
 
-The fallback tries installed Chrome and then Edge. It does not require Playwright's bundled Chromium. It uses an ignored dedicated browser profile and never copies the user's daily profile.
+**最常用的一条命令**（增量抓取 + 生成报告）：
 
-## Local state
+```powershell
+& $NODE scripts\electricity.mjs --room D1-101 --open
+```
 
-- `.local/`: temporary result and query-plan files, ignored by Git.
-- `browser/profiles/electricity/`: dedicated ignored browser state.
-- `reports/generated/`: optional ignored CSV/SVG output.
+- 首次运行会全量回填（约 1 分钟，见下方性能说明），之后每次只补最近几天，**几秒完成**。
+- `--open` 用 **Edge** 打开报告（这台机器默认浏览器是 Chrome，未开代理时打不开，所以脚本显式指定 Edge）。
+- 报告默认输出到 `out\<房间>-用电报告.html`，是自包含文件，可以直接发给别人或拷到手机上看。
 
-See `skills/electricity/SKILL.md` and `browser/README.md` for the detailed selector and fallback notes.
+## 常用参数
+
+| 参数 | 说明 |
+|---|---|
+| `--room, -r <名字>` | 房间名或编码：`D1-101`、`D1101`、`D13-1001`、`国交-101`、`河滨115`、`010101` |
+| `--from` / `--to` | 日期区间，默认 `2020-01-01` ~ 今天 |
+| `--conc <n>` | 并发会话数，默认 12。**不要超过 16**，实测 20 反而更慢 |
+| `--policy <p>` | 同日多值取舍：`max`（默认）`sum` `min` `first` `last` |
+| `--theme light\|dark` | 报告主题 |
+| `--full` | 忽略缓存整段重抓（换房间/怀疑数据错时用） |
+| `--report-only` | 只用已有缓存重新出图，不联网 |
+| `--no-report` | 只抓数据不出图 |
+| `--refresh-catalog` | 强制重建房间目录 |
+| `--json` | 输出机器可读摘要 |
+
+## 房间目录
+
+网站只有「楼栋 → 楼层 → 房间」三级联动，没有批量接口，所以技能预先抓了一份完整目录存在 `data/rooms.json`（40 栋楼 / 262 层 / 4773 个房间，重建约 2 秒，14 天后自动刷新）。
+
+```powershell
+& $NODE scripts\catalog.mjs --summary          # 查看每栋楼的楼层与房间
+& $NODE scripts\catalog.mjs --refresh-catalog  # 强制重建
+```
+
+**房间号不能靠算**，必须查表，原因：
+
+- `D13` 有 **14 层**，10~14 层是四位房间号（`D13-1001`，编码 `131001`）；一楼还是从 `D13-104` 开始的。
+- `国交`（8 层）、`河滨`（6 层）是中文楼名，房间叫 `国交-101`、`河滨-101`。
+- 有 33 个非数字房间：`D1-值班室`、`D7-备用`、`D30-1单元公共`、`D34-1层洗衣机` 等。
+- `D20一层` 在网站上重复出现了两次；`D23一层`、`D31一层` 有楼层但没有房间。
+
+房间编码规律（供排查用）：`楼栋(2位) + 楼层(2位) + 房号(2位)`，例如 `01`+`01`+`01` = `010101`。
+
+## 性能
+
+网站的 `OFFSET` 分页会随结果集变大而**急剧变慢**，而且冷查询约 1.4 秒、热查询只要 0.11 秒。因此抓取策略是「**把日期切成 6 天的小片 + 多个独立 session 并发**」——分片小则每次查询都便宜，多 session 则绕开了 ASP.NET 的 session 锁（同一 session 的并发请求会被服务端串行化）。
+
+冷缓存实测（2 年 / 731 条记录）：
+
+| 分片 | 并发 | 耗时 | 每条记录 |
+|---|---|---|---|
+| **6 天** | **12** | **12.8s** | **17ms** |
+| 12 天 | 12 | 23.0s | 31ms |
+| 20 天 | 12 | 33.6s | 46ms |
+| 90 天 | 6 | 156.1s | 213ms |
+| 12 天 | 20 | 46.4s | 63ms |
+
+完整 6 年回填（约 2200 条用电 + 460 条购电）实测约 **3 分钟**（642 次请求，0 失败）；日常增量更新只要 **2 秒**（21 次请求）。
+
+注意：学校服务器在持续压力下会明显变慢（同一批分片，短时测试 14 请求/秒，长跑时降到约 3.6 请求/秒），所以别把并发调到 16 以上，收益不大反而更慢。默认分片是**用电 6 天 / 购电 30 天**（见 `scripts/lib/site.mjs` 的 `DEFAULT_SHARD_DAYS`）。
+
+抓取失败会按分片隔离并重试，不会整批丢失；每个区间抓完就落盘，中断后重跑会自动续上。
+
+## 数据注意事项
+
+- **同日两条记录**：约 70 天服务器会返回两条数值不同的记录（例如 `2022-06-06` 同时有 11.07 和 12.23 度）。缓存把原始条目都留着，报告里可以随时切换取舍策略，默认取**较大值**（日常用量普遍 3~13 度，相加会出现 20+ 度的异常尖峰）。报告表格里这些天会标黄。
+- **购电含负数**：退款/冲正会以负数出现（如 `-1.00 度 / -0.66 元`），报告里用红色柱子区分。
+- **数据起点**：站上最早的数据是 2020-08 左右，更早的日期查不到。
+- **缺数据的天**：放假或无人时没有记录，报告按「无记录」处理并在统计卡里提示缺多少天。
+- **余额反推**：报告里的余额曲线是用 `余额(t) = 当前余额 − 之后的购电 + 之后的用电` 倒推的，仅供参考，数据缺失时会累积误差。
+
+## 文件结构
+
+```
+electricity-query/
+├─ SKILL.md
+├─ config.json              # 默认房间、并发、取舍策略、浏览器
+├─ scripts/
+│  ├─ electricity.mjs       # 主命令：抓取 + 出图
+│  ├─ catalog.mjs           # 房间目录
+│  └─ lib/
+│     ├─ client.mjs         # HTTP 客户端（GBK 解码、cookie、重试、统计）
+│     ├─ site.mjs           # 站点流程：联动、分片抓取、记录解析
+│     ├─ rooms.mjs          # 房间名解析与模糊匹配
+│     ├─ catalog.mjs        # 目录抓取
+│     ├─ cache.mjs          # 本地缓存与增量合并
+│     ├─ dates.mjs          # 日期工具
+│     └─ report.mjs         # 生成自包含 HTML
+├─ assets/                  # echarts.min.js / report.js / report.css
+├─ data/                    # 缓存（rooms.json + 每房间一个 json）
+└─ out/                     # 生成的报告
+```
+
+## 排查
+
+- **报告打开是空白** → 必须用 Edge 或其它浏览器打开 `out\*.html`；文件是自包含的，不需要联网。
+- **查询失败 / 房间选择被拒** → 先 `--refresh-catalog` 重建目录，再确认房间名拼写；错误信息会给出相近的房间名建议。
+- **数据看着不对** → 加 `--full` 整段重抓；再用 `--policy` 换一种同日多值取舍。
+- **想换默认房间** → 改 `config.json` 的 `room` 字段，之后 `--room` 可以省略。

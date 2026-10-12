@@ -1,0 +1,10 @@
+{
+  "room": null,
+  "base": "http://10.10.60.223:8010/",
+  "concurrency": 12,
+  "policy": "max",
+  "theme": "light",
+  "historyStart": "2020-01-01",
+  "recheckDays": 7,
+  "browser": "edge"
+}

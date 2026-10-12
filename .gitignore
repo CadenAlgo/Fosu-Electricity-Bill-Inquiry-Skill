@@ -1,11 +1,12 @@
-__pycache__/
-*.py[cod]
-.pytest_cache/
-.venv/
-.idea/
-config/profile.json
-config/electricity.json
-browser/profiles/
-.local/
-reports/generated/
+# 本地数据与生成物 —— 绝对不要提交
+# data/ 里存的是各宿舍的用电/购电缓存（属于使用者的个人数据）
+# out/  里是生成的报告 HTML
+data/
+out/
+
+# 依赖与系统文件
+node_modules/
+.DS_Store
+Thumbs.db
+desktop.ini
 *.log

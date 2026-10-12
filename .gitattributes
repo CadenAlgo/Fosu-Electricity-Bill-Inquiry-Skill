@@ -1,0 +1,6 @@
+# 统一用 LF，避免 Windows 上出现整文件级别的换行改动
+* text=auto eol=lf
+
+# 内嵌进 HTML 报告的第三方库与图片：必须逐字节保持原样，不做换行转换
+assets/echarts.min.js -text
+docs/*.png -text
